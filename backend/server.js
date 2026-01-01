@@ -14,18 +14,32 @@ const socketHandler = require("./socket/socketHandler");
 const app = express();
 const server = http.createServer(app);
 
+const allowedOrigins = [
+    "http://localhost:5173",
+    "https://ai-powered-chatbot-for-customer-support-1.onrender.com",
+    process.env.FRONTEND_URL
+].filter(Boolean);
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            console.log("Blocked by CORS:", origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true
+};
+
 const io = new Server(server, {
-    cors: {
-        origin: process.env.FRONTEND_URL || "http://localhost:5173",
-        methods: ["GET", "POST"],
-        credentials: true
-    }
+    cors: corsOptions
 });
 
-app.use(cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    credentials: true
-}));
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
