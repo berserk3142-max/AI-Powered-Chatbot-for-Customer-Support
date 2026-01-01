@@ -35,6 +35,8 @@ graph TD
 
 ## 🛠️ Environment Variables
 
+### Backend Configuration
+
 Create a `.env` file in the `backend` directory:
 
 ```env
@@ -48,6 +50,23 @@ OPENAI_API_KEY=sk-...
 PORT=5000
 FRONTEND_URL=http://localhost:5173
 ```
+
+### Frontend Configuration
+
+Create a `.env` file in the `frontend` directory:
+
+```env
+# Backend API URL
+VITE_API_URL=http://localhost:5000
+
+# Socket.io URL
+VITE_SOCKET_URL=http://localhost:5000
+```
+
+**For Production Deployment:**
+- Set `VITE_API_URL` and `VITE_SOCKET_URL` to your deployed backend URL
+- Example: `https://your-backend-name.onrender.com`
+- Configure these as environment variables in your hosting platform (Vercel/Render)
 
 ## 📚 API Endpoints
 
