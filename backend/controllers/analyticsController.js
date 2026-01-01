@@ -5,6 +5,9 @@
 
 const Chat = require("../models/Chat");
 const { getStats: getKBStats } = require("../services/kbService");
+const mongoose = require("mongoose");
+
+const isMongoConnected = () => mongoose.connection.readyState === 1;
 
 /**
  * Get overall analytics
@@ -12,6 +15,29 @@ const { getStats: getKBStats } = require("../services/kbService");
  */
 exports.getOverview = async (req, res) => {
     try {
+        // KB stats (always available)
+        const kbStats = getKBStats();
+
+        // If MongoDB is not connected, return demo data
+        if (!isMongoConnected()) {
+            return res.json({
+                overview: {
+                    totalConversations: 0,
+                    totalMessages: 0,
+                    userMessages: 0,
+                    assistantMessages: 0
+                },
+                sources: {
+                    aiCalls: 0,
+                    kbHits: 0,
+                    aiFallbackRate: 0
+                },
+                recentActivity: [],
+                knowledgeBase: kbStats,
+                note: "Running without MongoDB - analytics are limited"
+            });
+        }
+
         // Total conversations
         const totalConversations = await Chat.countDocuments();
 
@@ -59,9 +85,6 @@ exports.getOverview = async (req, res) => {
             },
             { $sort: { _id: 1 } }
         ]);
-
-        // KB stats
-        const kbStats = getKBStats();
 
         res.json({
             overview: {

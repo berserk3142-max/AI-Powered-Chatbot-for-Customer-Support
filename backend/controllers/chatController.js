@@ -8,6 +8,12 @@ const Chat = require("../models/Chat");
 const { searchKB } = require("../services/kbService");
 const { askAI, isConfigured } = require("../services/openaiService");
 const { v4: uuidv4 } = require("uuid");
+const mongoose = require("mongoose");
+
+// In-memory storage fallback when MongoDB is not available
+const inMemoryChats = new Map();
+
+const isMongoConnected = () => mongoose.connection.readyState === 1;
 
 /**
  * Handle incoming chat message
@@ -27,27 +33,39 @@ exports.handleMessage = async (req, res) => {
         const finalUserId = userId || uuidv4();
         const finalSessionId = sessionId || uuidv4();
 
-        // Find existing chat or create new one
-        let chat = await Chat.findOne({
-            userId: finalUserId,
-            sessionId: finalSessionId
-        });
+        let chat;
+        let messages = [];
+        let metadata = { aiCallsCount: 0, kbHitsCount: 0, totalMessages: 0 };
 
-        if (!chat) {
-            chat = new Chat({
+        if (isMongoConnected()) {
+            // Use MongoDB
+            chat = await Chat.findOne({
                 userId: finalUserId,
-                sessionId: finalSessionId,
-                messages: [],
-                metadata: {
-                    aiCallsCount: 0,
-                    kbHitsCount: 0,
-                    totalMessages: 0
-                }
+                sessionId: finalSessionId
             });
+
+            if (!chat) {
+                chat = new Chat({
+                    userId: finalUserId,
+                    sessionId: finalSessionId,
+                    messages: [],
+                    metadata: { aiCallsCount: 0, kbHitsCount: 0, totalMessages: 0 }
+                });
+            }
+            messages = chat.messages;
+            metadata = chat.metadata;
+        } else {
+            // Use in-memory storage
+            const chatKey = `${finalUserId}_${finalSessionId}`;
+            if (inMemoryChats.has(chatKey)) {
+                const stored = inMemoryChats.get(chatKey);
+                messages = stored.messages;
+                metadata = stored.metadata;
+            }
         }
 
         // Add user message
-        chat.messages.push({
+        messages.push({
             role: "user",
             content: message.trim(),
             source: "user",
@@ -62,16 +80,16 @@ exports.handleMessage = async (req, res) => {
         if (kbResult) {
             reply = kbResult.response;
             source = "kb";
-            chat.metadata.kbHitsCount += 1;
+            metadata.kbHitsCount += 1;
         } else {
             // Fallback to AI
             if (isConfigured()) {
                 // Get last 6 messages for context (industry standard)
-                const contextMessages = chat.messages.slice(-6);
+                const contextMessages = messages.slice(-6);
                 const aiResult = await askAI(contextMessages);
                 reply = aiResult.content;
                 source = "ai";
-                chat.metadata.aiCallsCount += 1;
+                metadata.aiCallsCount += 1;
             } else {
                 // AI not configured - provide fallback
                 reply = "I'd love to help you with that! 🤔 For detailed assistance, please contact our support team at support@example.com or try asking about our pricing, refunds, features, or support hours.";
@@ -80,7 +98,7 @@ exports.handleMessage = async (req, res) => {
         }
 
         // Add assistant response
-        chat.messages.push({
+        messages.push({
             role: "assistant",
             content: reply,
             source,
@@ -88,14 +106,21 @@ exports.handleMessage = async (req, res) => {
         });
 
         // Save chat
-        await chat.save();
+        if (isMongoConnected()) {
+            chat.messages = messages;
+            chat.metadata = metadata;
+            await chat.save();
+        } else {
+            const chatKey = `${finalUserId}_${finalSessionId}`;
+            inMemoryChats.set(chatKey, { messages, metadata, userId: finalUserId, sessionId: finalSessionId });
+        }
 
         res.json({
             reply,
             source,
             userId: finalUserId,
             sessionId: finalSessionId,
-            messageCount: chat.messages.length
+            messageCount: messages.length
         });
 
     } catch (error) {
@@ -106,6 +131,7 @@ exports.handleMessage = async (req, res) => {
         });
     }
 };
+
 
 /**
  * Get chat history
@@ -198,23 +224,34 @@ exports.createSession = async (req, res) => {
         const finalUserId = userId || uuidv4();
         const sessionId = uuidv4();
 
-        const chat = new Chat({
-            userId: finalUserId,
-            sessionId,
-            messages: [{
-                role: "assistant",
-                content: "👋 Hello! Welcome to our support chat. I'm here to help you with any questions about our product, pricing, account issues, or technical support. How can I assist you today?",
-                source: "kb",
-                timestamp: new Date()
-            }]
-        });
+        const welcomeMessage = {
+            role: "assistant",
+            content: "👋 Hello! Welcome to our support chat. I'm here to help you with any questions about our product, pricing, account issues, or technical support. How can I assist you today?",
+            source: "kb",
+            timestamp: new Date()
+        };
 
-        await chat.save();
+        if (isMongoConnected()) {
+            const chat = new Chat({
+                userId: finalUserId,
+                sessionId,
+                messages: [welcomeMessage]
+            });
+            await chat.save();
+        } else {
+            const chatKey = `${finalUserId}_${sessionId}`;
+            inMemoryChats.set(chatKey, {
+                messages: [welcomeMessage],
+                metadata: { aiCallsCount: 0, kbHitsCount: 0, totalMessages: 1 },
+                userId: finalUserId,
+                sessionId
+            });
+        }
 
         res.json({
             sessionId,
             userId: finalUserId,
-            welcomeMessage: chat.messages[0].content
+            welcomeMessage: welcomeMessage.content
         });
 
     } catch (error) {
@@ -224,3 +261,4 @@ exports.createSession = async (req, res) => {
         });
     }
 };
+
